@@ -26,7 +26,9 @@ Run [Claude Code](https://docs.anthropic.com/en/docs/claude-code) against your l
 
 ```fish
 lobby              # local model, private, offline-capable
-lobby --anthropic  # Anthropic API, full Claude power
+lobby --model      # pick a model interactively, then launch
+lobby --claude     # Claude.ai subscription — no API key needed
+lobby --anthropic  # Anthropic API key
 ```
 
 No proxy. No config files to hand-edit. Ollama v0.14+ speaks the Anthropic Messages API natively — `lobby` just sets the right environment variables and gets out of your way.
@@ -36,7 +38,7 @@ No proxy. No config files to hand-edit. Ollama v0.14+ speaks the Anthropic Messa
 ## Install
 
 ```fish
-git clone https://github.com/yourusername/lobby.git
+git clone https://github.com/kthrob/Lobby.git
 cd lobby
 fish setup.fish
 ```
@@ -59,7 +61,12 @@ Open a new terminal when done.
 
 ```fish
 lobby                         # run Claude Code with your default local model
-lobby --anthropic             # run Claude Code via Anthropic API
+lobby --model                 # pick a local model interactively, then run
+lobby --model mistral         # run with a specific model (validated)
+lobby --claude                # run Claude Code via your Claude.ai subscription
+lobby --claude --model        # pick a Claude model interactively, then run
+lobby --anthropic             # run Claude Code via Anthropic API key
+lobby --anthropic --model     # pick Anthropic model interactively, then run
 lobby --set                   # toggle which local models are enabled for lobby
 lobby --list                  # list currently enabled models
 lobby --set-default           # pick a default from locally installed Ollama models
@@ -67,10 +74,12 @@ lobby --set-anthropic-model   # pick a default Anthropic model
 lobby --help                  # show all commands
 ```
 
-Any extra arguments are passed straight through to `claude`:
+Any extra arguments after model selection are passed straight through to `claude`:
 
 ```fish
 lobby 'fix the failing tests'
+lobby --model mistral 'fix the failing tests'
+lobby --claude 'review this PR'
 lobby --anthropic --print 'review this PR'
 ```
 
@@ -85,7 +94,27 @@ lobby --list      # see which models are currently enabled
 
 When no allowlist exists, all installed models are available. Once you create an allowlist with `--set`, only those models can be launched.
 
-### Switching default local model
+### Picking a model for a one-off run
+
+```
+$ lobby --model
+
+Available models:
+  1) qwen2.5-coder:latest  ✓ current default
+  2) mistral:latest
+  3) llama3.1:8b
+
+[lobby] Select a number (1-3): 2
+[lobby] ✓ Using mistral:latest
+```
+
+Or supply the name directly — lobby validates it against your installed models:
+
+```fish
+lobby --model mistral
+```
+
+### Switching the saved default local model
 
 ```
 $ lobby --set-default
@@ -96,14 +125,16 @@ Available models:
   3) llama3.1:8b
 
 [lobby] Select a number (1-3): 2
-[lobby] ✓ Local default model set to: mistral:latest
+[lobby] ✓ Default model set to: mistral:latest
 ```
 
 ---
 
 ## How it works
 
-In **local mode**, `lobby` sets three env vars before calling `claude`:
+lobby has three modes, selected by flag:
+
+**Local mode** (`lobby` / `lobby --model`) sets three env vars before calling `claude`:
 
 ```
 ANTHROPIC_BASE_URL=http://127.0.0.1:11434
@@ -113,7 +144,9 @@ ANTHROPIC_API_KEY=""
 
 Ollama v0.14+ exposes an Anthropic Messages API-compatible endpoint natively at `/v1/messages` — no translation proxy needed. Claude Code talks to it like it's Anthropic.
 
-In **Anthropic mode**, those overrides are cleared and your real `ANTHROPIC_API_KEY` is used.
+**Subscription mode** (`lobby --claude`) clears all three overrides and lets Claude Code use its own OAuth session — the one from your Claude.ai account (Pro, Max, Team, or Enterprise). No API key is needed; just make sure you've logged in at least once with `claude /login` inside a normal terminal. The model is still selectable via `--model`.
+
+**API key mode** (`lobby --anthropic`) clears the Ollama overrides and uses your `ANTHROPIC_API_KEY` environment variable directly.
 
 ---
 
@@ -127,7 +160,7 @@ In **Anthropic mode**, those overrides are cleared and your real `ANTHROPIC_API_
 | [Node.js](https://nodejs.org) | Installed by `setup.fish` |
 | [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) | Installed by `setup.fish` |
 | [Ollama](https://ollama.com) v0.14+ | Installed by `setup.fish` |
-| `ANTHROPIC_API_KEY` | Only needed for `--anthropic` mode |
+| `ANTHROPIC_API_KEY` | Only needed for `--anthropic` mode (not `--claude`) |
 
 > **Recommended:** Use a model with at least 64k context for best results with Claude Code. `qwen2.5-coder` and `qwen3-coder` are good local choices.
 

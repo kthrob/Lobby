@@ -16,3 +16,4 @@
 # env / secrets
 .env
 .env.*
+.webui_secret_key

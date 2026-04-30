@@ -2,21 +2,26 @@
 #
 # Usage:
 #   lobby                        # run claude code with saved default local model
-#   lobby --anthropic            # run claude code against Anthropic's API
+#   lobby --model                # pick a model interactively, then run
+#   lobby --model <name>         # run with a specific model (validated)
+#   lobby --claude               # run claude code with your Claude.ai subscription (no API key needed)
+#   lobby --claude --model       # pick model interactively for subscription mode
+#   lobby --anthropic            # run claude code against Anthropic's API key
+#   lobby --anthropic --model    # pick Anthropic model interactively, then run
 #   lobby --set                  # toggle which models are enabled for lobby
 #   lobby --list                 # list models currently enabled for lobby
 #   lobby --set-default          # pick a default from locally installed Ollama models
 #   lobby --set-anthropic-model  # pick a default Anthropic model
 #   lobby --help / -h            # show this help
 
-function lobby --description "Run Claude Code against local Ollama or Anthropic"
+function lobby --description "Run Claude Code against local Ollama, Anthropic API, or Claude.ai subscription"
 
     set CONFIG_DIR           "$HOME/.config/lobby"
     set LOCAL_DEFAULT_FILE   "$CONFIG_DIR/default_local_model"
     set ENABLED_FILE         "$CONFIG_DIR/enabled_models"
     set ANTHROPIC_DEFAULT_FILE "$CONFIG_DIR/default_anthropic_model"
     set BUILTIN_LOCAL        "qwen2.5-coder:latest"
-    set BUILTIN_ANTHROPIC    "claude-sonnet-4-5"
+    set BUILTIN_ANTHROPIC    "claude-sonnet-4-6"
     set OLLAMA_URL           "http://127.0.0.1:11434"
 
     # ── helpers ────────────────────────────────────────────────────────────
@@ -55,6 +60,18 @@ function lobby --description "Run Claude Code against local Ollama or Anthropic"
         end
     end
 
+    function _lobby_wait_for_ollama
+        set _attempts 0
+        while test $_attempts -lt 10
+            if curl -sf "$OLLAMA_URL" > /dev/null 2>&1
+                return 0
+            end
+            sleep 1
+            set _attempts (math $_attempts + 1)
+        end
+        return 1
+    end
+
     function _lobby_local_models
         set _started_ollama 0
         if not pgrep -x ollama > /dev/null
@@ -62,7 +79,11 @@ function lobby --description "Run Claude Code against local Ollama or Anthropic"
             ollama serve > /dev/null 2>&1 &
             set _tmp_ollama_pid $last_pid
             set _started_ollama 1
-            sleep 2
+            if not _lobby_wait_for_ollama
+                _lobby_err "Ollama did not respond in time."
+                kill $_tmp_ollama_pid 2>/dev/null
+                return 1
+            end
         end
 
         set models (ollama list 2>/dev/null | tail -n +2 | awk '{print $1}')
@@ -83,7 +104,11 @@ function lobby --description "Run Claude Code against local Ollama or Anthropic"
             ollama serve > /dev/null 2>&1 &
             set _tmp_ollama_pid $last_pid
             set _started_ollama 1
-            sleep 2
+            if not _lobby_wait_for_ollama
+                _lobby_err "Ollama did not respond in time."
+                kill $_tmp_ollama_pid 2>/dev/null
+                return 1
+            end
         end
 
         ollama pull $model_name
@@ -96,6 +121,83 @@ function lobby --description "Run Claude Code against local Ollama or Anthropic"
         return $pull_status
     end
 
+    # Print a numbered model list and prompt the user to pick one.
+    # Prints the chosen model name to stdout; returns 1 on empty list.
+    # --argument-names: models_var (name of list variable), default_model
+    function _lobby_pick_model_interactive --argument-names default_model
+        # Caller passes models as remaining argv after default_model
+        set available_models $argv[2..]
+
+        if test (count $available_models) -eq 0
+            _lobby_err "No models available to pick from."
+            return 1
+        end
+
+        echo ""
+        echo (set_color --bold)"Available models:"(set_color normal)
+        for i in (seq (count $available_models))
+            if test "$available_models[$i]" = "$default_model"
+                echo (set_color yellow)"  $i) $available_models[$i]  ✓ current default"(set_color normal)
+            else
+                echo "  $i) $available_models[$i]"
+            end
+        end
+        echo ""
+
+        while true
+            read --prompt-str (set_color cyan)"[lobby]"(set_color normal)" Select a number (1-"(count $available_models)"): " choice
+            if string match -qr '^\d+$' -- $choice
+                and test $choice -ge 1
+                and test $choice -le (count $available_models)
+                echo $available_models[$choice]
+                return 0
+            end
+            _lobby_err "Please enter a number between 1 and "(count $available_models)"."
+        end
+    end
+
+    # ── unknown flag guard ─────────────────────────────────────────────────
+    # All lobby flags start with --. Any unrecognised --word is a likely typo.
+    # Catch it here before it silently becomes a model name or claude arg.
+
+    set _known_flags --help -h --list --set --set-default --set-anthropic-model --anthropic --claude --model
+
+    if test (count $argv) -gt 0
+        if string match -qr '^-' -- $argv[1]
+            if not contains -- $argv[1] $_known_flags
+                _lobby_err "Unknown option: $argv[1]"
+
+                # Simple did-you-mean: find the known flag sharing the longest common prefix
+                set _input $argv[1]
+                set _best ""
+                set _best_len 0
+                for flag in $_known_flags
+                    set _min_len (math "min("(string length -- $_input)", "(string length -- $flag)")")
+                    set _shared 0
+                    for j in (seq $_min_len)
+                        if test (string sub -s $j -l 1 -- $_input) = (string sub -s $j -l 1 -- $flag)
+                            set _shared (math $_shared + 1)
+                        else
+                            break
+                        end
+                    end
+                    if test $_shared -gt $_best_len
+                        set _best_len $_shared
+                        set _best $flag
+                    end
+                end
+
+                if test -n "$_best"; and test $_best_len -ge 3
+                    _lobby_err "  Did you mean: $_best?"
+                end
+                echo ""
+                echo "  Run "(set_color --bold)"lobby --help"(set_color normal)" for usage."
+                echo ""
+                return 1
+            end
+        end
+    end
+
     # ── --help ─────────────────────────────────────────────────────────────
 
     if test "$argv[1]" = "--help" -o "$argv[1]" = "-h"
@@ -104,28 +206,38 @@ function lobby --description "Run Claude Code against local Ollama or Anthropic"
         echo (set_color --bold)"lobby"(set_color normal)" — Claude Code launcher (local Ollama or Anthropic)"
         echo ""
         echo (set_color --bold)"USAGE"(set_color normal)
-        echo "  lobby [claude args...]          Run Claude Code via local Ollama"
-        echo "  lobby --anthropic [claude args] Run Claude Code via Anthropic API"
+        echo "  lobby                           Run Claude Code with your saved default local model"
+        echo "  lobby --model                   Pick a local model interactively, then run"
+        echo "  lobby --model <name>            Run with a specific local model (validated)"
+        echo "  lobby --claude                  Run Claude Code with your Claude.ai subscription"
+        echo "  lobby --claude --model          Pick model interactively for subscription mode"
+        echo "  lobby --anthropic               Run Claude Code via Anthropic API key"
+        echo "  lobby --anthropic --model       Pick Anthropic model interactively, then run"
         echo ""
         echo (set_color --bold)"OPTIONS"(set_color normal)
+        printf "  %-28s %s\n" "--model [name]"        "Override the model; omit name to pick interactively"
+        printf "  %-28s %s\n" "--claude"              "Use your Claude.ai subscription (Pro/Max/Team/Enterprise)"
         printf "  %-28s %s\n" "--set"                 "Interactively toggle which local models are enabled for lobby"
         printf "  %-28s %s\n" "--list"                "Show currently enabled models"
         printf "  %-28s %s\n" "--set-default"         "Pick a default from locally installed Ollama models"
         printf "  %-28s %s\n" "--set-anthropic-model" "Pick a default Anthropic model"
-        printf "  %-28s %s\n" "--anthropic"           "Use Anthropic's API instead of local Ollama"
+        printf "  %-28s %s\n" "--anthropic"           "Use Anthropic's API key instead of local Ollama"
         printf "  %-28s %s\n" "--help, -h"            "Show this help message"
         echo ""
         echo (set_color --bold)"CURRENT DEFAULTS"(set_color normal)
         echo "  Local model:     $current"
         echo ""
         echo (set_color --bold)"EXAMPLES"(set_color normal)
-        echo "  lobby                          # start Claude Code with $current"
+        echo "  lobby                          # start Claude Code with $current (local)"
+        echo "  lobby --model                  # pick a local model from a list, then launch"
+        echo "  lobby --model mistral          # launch with mistral (validated)"
+        echo "  lobby --claude                 # start Claude Code via Claude.ai subscription"
+        echo "  lobby --claude --model         # pick a Claude model, then launch via subscription"
         echo "  lobby --set                    # choose which models lobby is allowed to use"
         echo "  lobby --list                   # list currently enabled models"
         echo "  lobby --set-default            # choose default local model"
-        echo "  lobby --set-anthropic-model    # choose default Anthropic model"
-        echo "  lobby --anthropic              # start Claude Code via Anthropic API"
-        echo "  lobby 'fix the linting errors' # pass a prompt directly to Claude Code"
+        echo "  lobby --set-anthropic-model    # choose default Anthropic API model"
+        echo "  lobby --anthropic              # start Claude Code via Anthropic API key"
         echo ""
         echo (set_color --bold)"ENVIRONMENT (Ollama mode)"(set_color normal)
         echo "  ANTHROPIC_BASE_URL   $OLLAMA_URL"
@@ -133,9 +245,10 @@ function lobby --description "Run Claude Code against local Ollama or Anthropic"
         echo "  ANTHROPIC_API_KEY    (empty)"
         echo ""
         echo (set_color --bold)"NOTES"(set_color normal)
+        echo "  --claude uses your logged-in Claude.ai session (run 'claude /login' first)."
+        echo "  --anthropic uses your ANTHROPIC_API_KEY environment variable."
         echo "  If '$ENABLED_FILE' exists, only listed models can be launched with lobby."
         echo "  Ollama v0.14+ speaks the Anthropic Messages API natively — no proxy needed."
-        echo "  In Anthropic mode, your ANTHROPIC_API_KEY from the environment is used."
         echo "  Models with at least 64k context are recommended for Claude Code."
         echo ""
         return 0
@@ -294,29 +407,29 @@ function lobby --description "Run Claude Code against local Ollama or Anthropic"
     # ── --set-default (local Ollama model) ────────────────────────────────
 
     if test "$argv[1]" = "--set-default"
-        set models (_lobby_local_models)
-        set enabled_file_exists 0
+        set _sd_models (_lobby_local_models)
+        set _sd_enabled_file_exists 0
 
         if test -f "$ENABLED_FILE"
-            set enabled_file_exists 1
-            set enabled_models (_lobby_enabled_models $ENABLED_FILE)
+            set _sd_enabled_file_exists 1
+            set _sd_enabled (_lobby_enabled_models $ENABLED_FILE)
 
-            if test (count $enabled_models) -eq 0
+            if test (count $_sd_enabled) -eq 0
                 _lobby_err "No models are enabled for lobby. Run: lobby --set"
                 return 1
             end
 
-            set filtered_models
-            for model in $models
-                if contains -- $model $enabled_models
-                    set -a filtered_models $model
+            set _sd_filtered
+            for m in $_sd_models
+                if contains -- $m $_sd_enabled
+                    set -a _sd_filtered $m
                 end
             end
-            set models $filtered_models
+            set _sd_models $_sd_filtered
         end
 
-        if test (count $models) -eq 0
-            if test $enabled_file_exists -eq 1
+        if test (count $_sd_models) -eq 0
+            if test $_sd_enabled_file_exists -eq 1
                 _lobby_err "No enabled models are installed. Run: lobby --set (and use pull <model> if needed)."
             else
                 _lobby_err "No models found. Pull one first with: ollama pull <model>"
@@ -324,31 +437,10 @@ function lobby --description "Run Claude Code against local Ollama or Anthropic"
             return 1
         end
 
-        # Print numbered list
-        echo ""
-        echo (set_color --bold)"Available models:"(set_color normal)
-        set current (_lobby_saved_default $LOCAL_DEFAULT_FILE $BUILTIN_LOCAL)
-        for i in (seq (count $models))
-            if test "$models[$i]" = "$current"
-                echo (set_color yellow)"  $i) $models[$i]  ✓ current default"(set_color normal)
-            else
-                echo "  $i) $models[$i]"
-            end
-        end
-        echo ""
+        set _sd_current (_lobby_saved_default $LOCAL_DEFAULT_FILE $BUILTIN_LOCAL)
+        set selected (_lobby_pick_model_interactive $_sd_current $_sd_models)
+        or return 1
 
-        # Prompt for selection
-        while true
-            read --prompt-str (set_color cyan)"[lobby]"(set_color normal)" Select a number (1-"(count $models)"): " choice
-            if string match -qr '^\d+$' -- $choice
-                and test $choice -ge 1
-                and test $choice -le (count $models)
-                break
-            end
-            _lobby_err "Please enter a number between 1 and "(count $models)"."
-        end
-
-        set selected $models[$choice]
         mkdir -p $CONFIG_DIR
         echo $selected > $LOCAL_DEFAULT_FILE
         _lobby_ok "Default model set to: $selected"
@@ -358,50 +450,112 @@ function lobby --description "Run Claude Code against local Ollama or Anthropic"
     # ── --set-anthropic-model ─────────────────────────────────────────────
 
     if test "$argv[1]" = "--set-anthropic-model"
-        # Curated list of current Claude Code-capable models
-        set models \
-            "claude-opus-4-5" \
-            "claude-sonnet-4-5" \
-            "claude-haiku-4-5"
+        # Curated list of current Claude Code-capable models.
+        # Update this list when Anthropic releases new model generations.
+        set _ant_models \
+            "claude-opus-4-6" \
+            "claude-sonnet-4-6" \
+            "claude-haiku-4-5-20251001"
 
-        echo ""
-        echo (set_color --bold)"Available Anthropic models:"(set_color normal)
-        set current (_lobby_saved_default $ANTHROPIC_DEFAULT_FILE $BUILTIN_ANTHROPIC)
-        for i in (seq (count $models))
-            if test "$models[$i]" = "$current"
-                echo (set_color yellow)"  $i) $models[$i]  ✓ current default"(set_color normal)
-            else
-                echo "  $i) $models[$i]"
-            end
-        end
-        echo ""
-
-        while true
-            read --prompt-str (set_color cyan)"[lobby]"(set_color normal)" Select a number (1-"(count $models)"): " choice
-            if string match -qr '^\d+$' -- $choice
-                and test $choice -ge 1
-                and test $choice -le (count $models)
-                break
-            end
-            _lobby_err "Please enter a number between 1 and "(count $models)"."
-        end
+        set _ant_current (_lobby_saved_default $ANTHROPIC_DEFAULT_FILE $BUILTIN_ANTHROPIC)
+        set selected (_lobby_pick_model_interactive $_ant_current $_ant_models)
+        or return 1
 
         mkdir -p $CONFIG_DIR
-        echo $models[$choice] > $ANTHROPIC_DEFAULT_FILE
-        _lobby_ok "Anthropic default model set to: $models[$choice]"
+        echo $selected > $ANTHROPIC_DEFAULT_FILE
+        _lobby_ok "Anthropic default model set to: $selected"
         return 0
+    end
+
+    # ── --claude mode (Claude.ai subscription) ───────────────────────────
+    # Uses the OAuth session from 'claude /login' — no API key required.
+    # Clears all Ollama/gateway overrides so Claude Code uses its own auth.
+
+    if test "$argv[1]" = "--claude"
+        # Curated list of current Claude Code-capable models.
+        # Update this list when Anthropic releases new model generations.
+        set _claude_models \
+            "claude-opus-4-6" \
+            "claude-sonnet-4-6" \
+            "claude-haiku-4-5-20251001"
+
+        set _claude_default (_lobby_saved_default $ANTHROPIC_DEFAULT_FILE $BUILTIN_ANTHROPIC)
+
+        # Check for --model as next arg
+        if test "$argv[2]" = "--model"
+            if test (count $argv) -ge 3
+                # --model <name> supplied — validate against known list
+                set _override $argv[3]
+                if not contains -- $_override $_claude_models
+                    _lobby_err "'$_override' is not a recognised Claude model."
+                    _lobby_err "Known models: "(string join ", " $_claude_models)
+                    return 1
+                end
+                set _claude_model $_override
+                set passthrough_args $argv[4..]
+            else
+                # --model with no value — show picker
+                set _claude_model (_lobby_pick_model_interactive $_claude_default $_claude_models)
+                or return 1
+                set passthrough_args $argv[3..]
+            end
+        else
+            set _claude_model $_claude_default
+            set passthrough_args $argv[2..]
+        end
+
+        _lobby_info "Mode: Claude.ai subscription"
+        _lobby_info "Model: $_claude_model"
+        _lobby_info "(Using your logged-in Claude.ai account — run 'claude /login' if not authenticated)"
+
+        # Clear all Ollama/gateway overrides so Claude Code uses its own OAuth session
+        set -e ANTHROPIC_BASE_URL 2>/dev/null
+        set -e ANTHROPIC_AUTH_TOKEN 2>/dev/null
+        set -e ANTHROPIC_API_KEY 2>/dev/null
+
+        claude --model $_claude_model $passthrough_args
+        return
     end
 
     # ── --anthropic mode ──────────────────────────────────────────────────
 
     if test "$argv[1]" = "--anthropic"
-        set model (_lobby_saved_default $ANTHROPIC_DEFAULT_FILE $BUILTIN_ANTHROPIC)
-        set passthrough_args $argv[2..]
-
         if not set -q ANTHROPIC_API_KEY; or test -z "$ANTHROPIC_API_KEY"
             _lobby_err "ANTHROPIC_API_KEY is not set. Add it to your fish config:"
             _lobby_err "  set -Ux ANTHROPIC_API_KEY sk-ant-..."
             return 1
+        end
+
+        # Curated list of current Claude Code-capable models.
+        # Update this list when Anthropic releases new model generations.
+        set _anthropic_models \
+            "claude-opus-4-6" \
+            "claude-sonnet-4-6" \
+            "claude-haiku-4-5-20251001"
+
+        set _anthropic_default (_lobby_saved_default $ANTHROPIC_DEFAULT_FILE $BUILTIN_ANTHROPIC)
+
+        # Check for --model as next arg
+        if test "$argv[2]" = "--model"
+            if test (count $argv) -ge 3
+                # --model <name> supplied — validate against known list
+                set _override $argv[3]
+                if not contains -- $_override $_anthropic_models
+                    _lobby_err "'$_override' is not a recognised Anthropic model."
+                    _lobby_err "Known models: "(string join ", " $_anthropic_models)
+                    return 1
+                end
+                set model $_override
+                set passthrough_args $argv[4..]
+            else
+                # --model with no value — show picker
+                set model (_lobby_pick_model_interactive $_anthropic_default $_anthropic_models)
+                or return 1
+                set passthrough_args $argv[3..]
+            end
+        else
+            set model $_anthropic_default
+            set passthrough_args $argv[2..]
         end
 
         _lobby_info "Mode: Anthropic API"
@@ -424,23 +578,57 @@ function lobby --description "Run Claude Code against local Ollama or Anthropic"
         set enabled_models (_lobby_enabled_models $ENABLED_FILE)
     end
 
-    # Use passed model, or fall back to saved/builtin default
-    if test (count $argv) -gt 0
-        set MODEL $argv[1]
+    # Build the candidate model list (all installed, filtered by allowlist if set)
+    set _local_default (_lobby_saved_default $LOCAL_DEFAULT_FILE $BUILTIN_LOCAL)
 
+    if test "$argv[1]" = "--model"
+        # Need the model list for both picker and validation
+        set _all_local (_lobby_local_models)
         if test $enabled_file_exists -eq 1
-            if test (count $enabled_models) -eq 0
-                _lobby_err "No models are enabled. Run: lobby --set"
-                return 1
+            set _candidate_models
+            for m in $_all_local
+                if contains -- $m $enabled_models
+                    set -a _candidate_models $m
+                end
             end
+        else
+            set _candidate_models $_all_local
+        end
 
-            if not contains -- $MODEL $enabled_models
-                _lobby_err "Model '$MODEL' is not enabled for lobby. Run: lobby --set"
+        if test (count $_candidate_models) -eq 0
+            if test $enabled_file_exists -eq 1
+                _lobby_err "No enabled models are installed. Run: lobby --set"
+            else
+                _lobby_err "No models found. Pull one with: ollama pull <model>"
+            end
+            return 1
+        end
+
+        if test (count $argv) -ge 2
+            # --model <name> supplied — validate against installed/enabled models
+            set _override $argv[2]
+            if not contains -- $_override $_candidate_models
+                if test $enabled_file_exists -eq 1
+                    _lobby_err "'$_override' not found in your enabled models."
+                else
+                    _lobby_err "'$_override' not found in your installed models."
+                end
+                _lobby_err "Available: "(string join ", " $_candidate_models)
+                _lobby_err "Run 'lobby --model' (no value) to pick interactively."
                 return 1
             end
+            set MODEL $_override
+            set passthrough_args $argv[3..]
+        else
+            # --model with no value — interactive picker
+            set MODEL (_lobby_pick_model_interactive $_local_default $_candidate_models)
+            or return 1
+            set passthrough_args $argv[2..]
         end
     else
-        set MODEL (_lobby_saved_default $LOCAL_DEFAULT_FILE $BUILTIN_LOCAL)
+        # No --model flag — use saved/builtin default
+        set passthrough_args $argv[1..]
+        set MODEL $_local_default
 
         if test $enabled_file_exists -eq 1
             if test (count $enabled_models) -eq 0
@@ -463,7 +651,10 @@ function lobby --description "Run Claude Code against local Ollama or Anthropic"
     if not pgrep -x ollama > /dev/null
         _lobby_info "Starting Ollama server..."
         ollama serve > /dev/null 2>&1 &
-        sleep 2
+        if not _lobby_wait_for_ollama
+            _lobby_err "Ollama did not respond after 10 s — check your Ollama installation."
+            return 1
+        end
     end
 
     # Pull model if not already cached
