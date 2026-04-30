@@ -44,11 +44,12 @@ fish setup.fish
 The setup script handles everything in order:
 
 1. **Homebrew** — install or update
-2. **Node.js** — required by Claude Code CLI
-3. **Claude Code CLI** — `npm install -g @anthropic-ai/claude-code`
-4. **Ollama** — local model server
-5. Copies `lobby.fish` → `~/.config/fish/functions/` and makes it executable
-6. Optionally pulls a starter model (`qwen2.5-coder:latest`)
+2. **Python 3** — needed for tooling
+3. **Node.js** — required by Claude Code CLI
+4. **Claude Code CLI** — `npm install -g @anthropic-ai/claude-code`
+5. **Ollama** — local model server
+6. Copies `lobby.fish` → `~/.config/fish/functions/` and makes it executable
+7. Optionally pulls a starter model (`qwen2.5-coder:latest`)
 
 Open a new terminal when done.
 
@@ -59,6 +60,8 @@ Open a new terminal when done.
 ```fish
 lobby                         # run Claude Code with your default local model
 lobby --anthropic             # run Claude Code via Anthropic API
+lobby --set                   # toggle which local models are enabled for lobby
+lobby --list                  # list currently enabled models
 lobby --set-default           # pick a default from locally installed Ollama models
 lobby --set-anthropic-model   # pick a default Anthropic model
 lobby --help                  # show all commands
@@ -71,12 +74,23 @@ lobby 'fix the failing tests'
 lobby --anthropic --print 'review this PR'
 ```
 
+### Model management
+
+`lobby` supports an optional allowlist system to control which models can be used:
+
+```fish
+lobby --set       # interactively toggle which models are enabled
+lobby --list      # see which models are currently enabled
+```
+
+When no allowlist exists, all installed models are available. Once you create an allowlist with `--set`, only those models can be launched.
+
 ### Switching default local model
 
 ```
 $ lobby --set-default
 
-Available local models:
+Available models:
   1) qwen2.5-coder:latest  ✓ current default
   2) mistral:latest
   3) llama3.1:8b
@@ -136,6 +150,7 @@ set -Ux ANTHROPIC_API_KEY sk-ant-...
 | `~/.config/fish/functions/lobby.fish` | The installed function |
 | `~/.config/lobby/default_local_model` | Saved default local Ollama model |
 | `~/.config/lobby/default_anthropic_model` | Saved default Anthropic model |
+| `~/.config/lobby/enabled_models` | Optional allowlist of enabled models |
 
 ---
 
