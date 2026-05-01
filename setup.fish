@@ -269,9 +269,11 @@ else
     if test -f ./.venv/bin/python3
         info "Installing mem0ai and qdrant-client into venv..."
         if command -q uv
-            uv pip install --python .venv/bin/python3 mem0ai qdrant-client
+            uv pip install --python .venv/bin/python3 mem0ai qdrant-client ollama
+        else if test -f ./.venv/bin/pip
+            ./.venv/bin/pip install --quiet mem0ai qdrant-client ollama
         else
-            ./.venv/bin/pip install --quiet mem0ai qdrant-client
+            python3 -m pip install --quiet --target .venv/lib mem0ai qdrant-client ollama
         end
 
         if test $status -eq 0
