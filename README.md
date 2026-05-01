@@ -171,7 +171,14 @@ After setup completes, `setup.fish` automatically runs an integration test that:
 If you need to re-run the test:
 
 ```fish
-.venv/bin/python3 scripts/test_mem0_integration.py
+./venv/bin/python3 scripts/test_mem0_integration.py
+```
+
+Or activate the venv first:
+
+```fish
+source .venv/bin/activate.fish
+python3 scripts/test_mem0_integration.py
 ```
 
 This will show 7 test results with pass/fail status. All tests passing means mem0 is ready to use. If Qdrant is down, start it with `docker compose up -d`.
