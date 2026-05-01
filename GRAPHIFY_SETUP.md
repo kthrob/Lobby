@@ -41,12 +41,11 @@ This writes a PreToolUse hook to your settings.json (we'll enhance this in Step 
 From the lobby repo root:
 
 ```bash
-# Create and activate Python virtual environment
-python3 -m venv .venv
-source .venv/bin/activate   # On Windows: .venv\Scripts\activate
+# Create virtual environment
+uv venv .venv
 
-# Install mem0 and Qdrant client
-pip install mem0ai qdrant-client
+# Install mem0 and Qdrant client into it
+uv pip install --python .venv/bin/python3 mem0ai qdrant-client
 ```
 
 ### Step 3: Start Qdrant
@@ -68,8 +67,7 @@ docker ps | grep qdrant
 Test that mem0 is configured correctly:
 
 ```bash
-source .venv/bin/activate
-python3 -c "
+.venv/bin/python3 -c "
 from mem0 import Memory
 import sys
 sys.path.insert(0, '.')
@@ -123,7 +121,6 @@ chmod +x .git/hooks/post-commit
 Sync the initial graph insights into mem0:
 
 ```bash
-source .venv/bin/activate
 .venv/bin/python3 scripts/sync_graph_to_mem0.py
 ```
 
@@ -174,12 +171,11 @@ echo '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' | \
 # Expected: JSON listing add_memory, search_memory, get_all_memories, delete_memory
 
 # 3. God-node sync ran
-source .venv/bin/activate
 .venv/bin/python3 scripts/sync_graph_to_mem0.py
 # Expected: "Synced N graph insights to mem0." (N > 0)
 
 # 4. Memory is retrievable
-python3 -c "
+.venv/bin/python3 -c "
 from mem0 import Memory
 import sys
 sys.path.insert(0, '.')
@@ -195,7 +191,7 @@ print([x['memory'][:60] for x in r])
 # Expected: graphify reminder line + mem0 memory lines
 
 # 6. .mcp.json is valid JSON
-python3 -c "import json; json.load(open('.mcp.json')); print('valid')"
+.venv/bin/python3 -c "import json; json.load(open('.mcp.json')); print('valid')"
 # Expected: "valid"
 ```
 
@@ -228,7 +224,7 @@ docker compose down && docker compose up -d
 graphify --version
 
 # Reinstall if needed
-pipx uninstall graphifyy && pipx install graphifyy
+uv tool uninstall graphifyy && uv tool install graphifyy
 ```
 
 **mem0 extraction failures:**
