@@ -238,6 +238,51 @@ else
     end
 end
 
+# ── 6b. Python venv for local mem0 scripts ────────────────────────────────────
+# Creates .venv and installs mem0ai + qdrant-client so scripts/mem0_mcp_server.py
+# and scripts/pre_tool_context.py can run without polluting the system Python.
+
+header "Python venv (mem0 scripts)"
+
+if not command -q python3
+    warn "python3 not found — skipping venv setup."
+    warn "Install Python 3 and re-run setup.fish."
+else
+    if test -f ./.venv/bin/python3
+        ok "Python venv already exists"
+    else
+        info "Creating Python venv at .venv ..."
+        if command -q uv
+            uv venv .venv
+        else
+            python3 -m venv .venv
+        end
+
+        if test $status -ne 0
+            warn "Failed to create venv. You can do it manually:"
+            warn "  python3 -m venv .venv"
+        else
+            ok "Venv created"
+        end
+    end
+
+    if test -f ./.venv/bin/python3
+        info "Installing mem0ai and qdrant-client into venv..."
+        if command -q uv
+            uv pip install --python .venv/bin/python3 mem0ai qdrant-client
+        else
+            ./.venv/bin/pip install --quiet mem0ai qdrant-client
+        end
+
+        if test $status -eq 0
+            ok "mem0ai and qdrant-client installed"
+        else
+            warn "Package install failed. Try manually:"
+            warn "  .venv/bin/pip install mem0ai qdrant-client"
+        end
+    end
+end
+
 # ── 7. Install lobby.fish ─────────────────────────────────────────────────────
 
 header "Installing lobby"
@@ -328,11 +373,12 @@ if test -f ./.venv/bin/python3
         ok "All mem0 tests passed!"
     else
         warn "Some mem0 tests failed — check output above"
-        warn "You can re-run the test anytime with: .venv/bin/python3 scripts/test_mem0_integration.py"
+        warn "You can re-run the test anytime with:"
+        warn "  cd /Users/admin/Scripts/lobby && ./.venv/bin/python3 scripts/test_mem0_integration.py"
     end
 else
     warn "Python venv not found — skipping mem0 tests"
-    info "You can run tests later with: .venv/bin/python3 scripts/test_mem0_integration.py"
+    info "You can run tests later after re-running setup.fish"
 end
 
 # ── done ──────────────────────────────────────────────────────────────────────
