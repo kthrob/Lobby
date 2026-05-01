@@ -158,6 +158,24 @@ docker compose up -d    # from the lobby repo root
 lobby --memory          # verify status
 ```
 
+### Testing mem0 integration
+
+After setup completes, `setup.fish` automatically runs an integration test that:
+
+1. Seeds 4 test memories (decision, preference, insight, observation) into mem0
+2. Verifies semantic search works
+3. Validates metadata schema enforcement
+4. Checks PreToolUse hook configuration
+5. Tests contextual memory injection
+
+If you need to re-run the test:
+
+```fish
+.venv/bin/python3 scripts/test_mem0_integration.py
+```
+
+This will show 7 test results with pass/fail status. All tests passing means mem0 is ready to use. If Qdrant is down, start it with `docker compose up -d`.
+
 ---
 
 ## How it works
