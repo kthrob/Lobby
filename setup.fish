@@ -315,6 +315,26 @@ else
     info "Use "(set_color cyan)"lobby --set-default"(set_color normal)" to pick the default"
 end
 
+# ── test: verify mem0 integration ─────────────────────────────────────────────
+
+header "Testing mem0 integration"
+
+if test -f ./.venv/bin/python3
+    info "Running mem0 integration test suite..."
+    ./.venv/bin/python3 scripts/test_mem0_integration.py
+    set test_exit_code $status
+
+    if test $test_exit_code -eq 0
+        ok "All mem0 tests passed!"
+    else
+        warn "Some mem0 tests failed — check output above"
+        warn "You can re-run the test anytime with: .venv/bin/python3 scripts/test_mem0_integration.py"
+    end
+else
+    warn "Python venv not found — skipping mem0 tests"
+    info "You can run tests later with: .venv/bin/python3 scripts/test_mem0_integration.py"
+end
+
 # ── done ──────────────────────────────────────────────────────────────────────
 
 echo ""
