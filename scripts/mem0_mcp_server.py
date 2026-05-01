@@ -3,12 +3,14 @@ MCP stdio server exposing mem0 memory operations to Claude Code.
 Tools: add_memory, search_memory, get_all_memories, delete_memory
 """
 import sys, json
+from datetime import datetime
 from mem0 import Memory
 sys.path.insert(0, ".")
 from scripts.mem0_config import MEM0_CONFIG
 
 m = Memory.from_config(MEM0_CONFIG)
 PROJECT_ID = "project"
+VALID_MEMORY_TYPES = {"decision", "preference", "insight", "observation"}
 
 
 def handle(request: dict) -> dict:
@@ -32,12 +34,12 @@ def handle(request: dict) -> dict:
             "result": {"tools": [
                 {
                     "name": "add_memory",
-                    "description": "Store a memory about this project, a decision, or a developer preference. Persists across Claude Code sessions.",
+                    "description": "Store a memory about this project, a decision, or a developer preference. Persists across Claude Code sessions. Metadata should include type (required: 'decision'|'preference'|'insight'|'observation') and optional component name. Date is auto-added.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
                             "content": {"type": "string", "description": "The memory text to store"},
-                            "metadata": {"type": "object", "description": "Optional metadata dict (e.g. {type: 'decision', component: 'auth'})"}
+                            "metadata": {"type": "object", "description": "Required metadata: {type: 'decision'|'preference'|'insight'|'observation', component?: 'name'}. Date (ISO 8601) is auto-added."}
                         },
                         "required": ["content"]
                     }
@@ -77,12 +79,32 @@ def handle(request: dict) -> dict:
 
         try:
             if name == "add_memory":
-                m.add(
-                    args["content"],
-                    user_id=PROJECT_ID,
-                    metadata=args.get("metadata", {})
-                )
-                text = f"Stored memory: {args['content'][:80]}..."
+                metadata = args.get("metadata", {})
+
+                # Validate metadata type field if provided
+                if "type" in metadata:
+                    if metadata["type"] not in VALID_MEMORY_TYPES:
+                        text = f"Error: Invalid memory type '{metadata['type']}'. Must be one of: {', '.join(sorted(VALID_MEMORY_TYPES))}"
+                    else:
+                        # Auto-add date if missing
+                        if "date" not in metadata:
+                            metadata["date"] = datetime.now().strftime("%Y-%m-%d")
+                        m.add(
+                            args["content"],
+                            user_id=PROJECT_ID,
+                            metadata=metadata
+                        )
+                        text = f"Stored memory ({metadata.get('type', 'general')}): {args['content'][:80]}..."
+                else:
+                    # No type provided — store without validation but warn
+                    if "date" not in metadata:
+                        metadata["date"] = datetime.now().strftime("%Y-%m-%d")
+                    m.add(
+                        args["content"],
+                        user_id=PROJECT_ID,
+                        metadata=metadata
+                    )
+                    text = f"Stored memory (untyped): {args['content'][:80]}... [Note: include 'type' in metadata for better organization]"
             elif name == "search_memory":
                 memories = m.search(args["query"], user_id=PROJECT_ID, limit=args.get("limit", 5))
                 if not memories:

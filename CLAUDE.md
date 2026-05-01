@@ -116,12 +116,56 @@ Claude Code CLI
 
 - Call `add_memory` (MCP: mem0) immediately.
 - Memory format: `"[Component]: [Decision]. Rationale: [why]."`
-- Include metadata: `{"type": "decision", "component": "<name>"}`
+- Include metadata: `{"type": "decision", "component": "<name>"}` (see Memory metadata schema section for details)
 
 ### Storing developer preferences
 
 - When the user states a preference (style, tooling, patterns), store it with `add_memory` and metadata `{"type": "preference"}`.
 - These persist across sessions — do not ask the user to repeat preferences that are already in mem0.
+
+### Memory metadata schema
+
+All memories stored via `add_memory` should include standardized metadata for consistency and searchability. The schema is enforced by the mem0 MCP server:
+
+**Required fields:**
+- `content`: The memory text (required in all cases)
+- `metadata.type`: One of `"decision"`, `"preference"`, `"insight"`, or `"observation"` (validates on store)
+
+**Auto-added fields:**
+- `metadata.date`: ISO 8601 date (auto-added if missing, defaults to today)
+
+**Optional fields:**
+- `metadata.component`: Component or area this memory relates to (e.g., "auth", "api", "frontend")
+
+**Examples:**
+
+```python
+# Store an architectural decision
+add_memory(
+  content="Chose to split auth into separate service for scalability. Decouples user management from API layer.",
+  metadata={"type": "decision", "component": "auth"}
+)
+
+# Store a developer preference
+add_memory(
+  content="Prefer async/await over Promise chains for readability.",
+  metadata={"type": "preference"}
+)
+
+# Store an insight about the codebase
+add_memory(
+  content="The payment service has tight coupling to the database layer; refactoring would unlock scalability.",
+  metadata={"type": "insight", "component": "payments"}
+)
+
+# Store an observation
+add_memory(
+  content="User signup flow breaks on Safari with more than 2 SMS attempts.",
+  metadata={"type": "observation", "component": "auth"}
+)
+```
+
+Invalid metadata types will be rejected with an error listing valid options. Memories without a `type` field will be stored with a note to include metadata in future additions.
 
 ### Graph maintenance
 
