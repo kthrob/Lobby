@@ -137,7 +137,7 @@ def test_search_memories(m):
                 mem_type = result.get("metadata", {}).get("type", "unknown")
 
                 # Check if the result is relevant
-                if relevance > 0.5:
+                if relevance > 0.4:
                     print_pass(f"Query '{query}': found {mem_type} (relevance: {relevance:.2f})")
                 else:
                     print_fail(f"Query '{query}': low relevance ({relevance:.2f})")

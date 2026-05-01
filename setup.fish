@@ -267,21 +267,27 @@ else
     end
 
     if test -f ./.venv/bin/python3
-        info "Installing mem0ai and qdrant-client into venv..."
+        info "Installing mem0ai, spaCy, fastembed, qdrant-client, ollama into venv..."
         if command -q uv
-            uv pip install --python .venv/bin/python3 mem0ai qdrant-client ollama
+            uv pip install --python .venv/bin/python3 "mem0ai[nlp]" qdrant-client ollama fastembed
         else if test -f ./.venv/bin/pip
-            ./.venv/bin/pip install --quiet mem0ai qdrant-client ollama
+            ./.venv/bin/pip install --quiet "mem0ai[nlp]" qdrant-client ollama fastembed
         else
-            python3 -m pip install --quiet --target .venv/lib mem0ai qdrant-client ollama
+            python3 -m pip install --quiet --target .venv/lib "mem0ai[nlp]" qdrant-client ollama fastembed
         end
 
         if test $status -eq 0
-            ok "mem0ai and qdrant-client installed"
+            ok "mem0ai, spaCy, fastembed, qdrant-client, ollama installed"
         else
             warn "Package install failed. Try manually:"
-            warn "  .venv/bin/pip install mem0ai qdrant-client"
+            warn "  uv pip install 'mem0ai[nlp]' qdrant-client ollama fastembed"
         end
+
+        # Download spaCy English model (required for memory extraction)
+        info "Downloading spaCy English model (en_core_web_sm)..."
+        ./.venv/bin/python3 -m spacy download en_core_web_sm > /dev/null 2>&1
+        and ok "spaCy en_core_web_sm ready"
+        or warn "spaCy model download failed — memory extraction may be degraded"
     end
 end
 
