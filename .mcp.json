@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "graphify": {
+      "type": "stdio",
+      "command": ".venv/bin/python3",
+      "args": ["-m", "graphify.serve", "graphify-out/graph.json"]
+    },
+    "mem0": {
+      "type": "stdio",
+      "command": ".venv/bin/python3",
+      "args": ["scripts/mem0_mcp_server.py"]
+    }
+  }
+}

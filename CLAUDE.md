@@ -17,8 +17,14 @@ The `lobby` function includes an optional model allowlist system (`enabled_model
 | File | Description |
 |---|---|
 | `lobby.fish` | The fish function — the main deliverable |
-| `setup.fish` | Installer: checks/installs dependencies, installs `lobby.fish`, sets up mem0 |
+| `setup.fish` | Installer: checks/installs dependencies, installs `lobby.fish`, sets up mem0, graphify |
 | `docker-compose.yml` | Starts Qdrant (vector store for mem0) via OrbStack Docker |
+| `.mcp.json` | Registers graphify and mem0 MCP servers with Claude Code |
+| `scripts/mem0_config.py` | mem0 configuration (Ollama + Qdrant backend) |
+| `scripts/mem0_mcp_server.py` | MCP server implementation for mem0 |
+| `scripts/sync_graph_to_mem0.py` | Syncs graphify god nodes into mem0 |
+| `scripts/pre_tool_context.py` | PreToolUse hook for contextual memory injection |
+| `graphify-out/` | Knowledge graph artifacts (committed to git, cache excluded) |
 | `CLAUDE.md` | This file — context for agents |
 | `README.md` | Human-facing documentation |
 | `BACKLOG.md` | Planned features, improvements, and bug fixes (see below) |
@@ -64,62 +70,80 @@ If `~/.config/lobby/enabled_models` exists, only models listed in that file can 
 
 ---
 
-## mem0 persistent memory
-
-`lobby` integrates [mem0-mcp-selfhosted](https://github.com/elvismdev/mem0-mcp-selfhosted) to give every Claude Code session persistent memory across terminals and days. The memory layer is fully local — no cloud API keys required.
+## Knowledge graph + persistent memory (graphify + mem0)
 
 ### Architecture
 
 ```
-lobby → claude (CLI) → MCP (stdio) → mem0-mcp-selfhosted (uvx) → Qdrant (OrbStack Docker)
-                                             ↓
-                                      Ollama (LLM + bge-m3 embeddings)
+Claude Code CLI
+    ├─ MCP: graphify         (query_graph, get_node, get_neighbors, shortest_path)
+    │   └─ graphify-out/graph.json (codebase structure, entities, relationships)
+    │
+    └─ MCP: mem0             (add_memory, search_memory, get_all_memories, delete_memory)
+        └─ Qdrant (vector store) ← Ollama (llama3 LLM + nomic-embed-text embeddings)
 ```
 
-- **Qdrant** stores memory vectors in an OrbStack Docker container (`docker-compose.yml` in repo root)
-- **mem0-mcp-selfhosted** is launched as a stdio subprocess by Claude Code at session start — no separate daemon
-- **bge-m3** is the local embedding model (pulled via `ollama pull bge-m3`)
-- **MCP registration** lives in `~/.claude.json` (scope: user) — applies to all projects
+- **graphify** builds a structural knowledge graph of the codebase (entities, relationships, call graphs). Persists to `graphify-out/` in git. Compresses token cost by ~71x for architecture queries.
+- **mem0** stores episodic and semantic memories across sessions (decisions, preferences, patterns). Backed by local Ollama models — no cloud calls.
+- A **sync script** (`scripts/sync_graph_to_mem0.py`) promotes graphify's god nodes into mem0 so structural insights survive across graph rebuilds.
 
 ### Repo files
 
 | File | Purpose |
 |---|---|
+| `.mcp.json` | Registers both MCP servers with Claude Code |
+| `scripts/mem0_config.py` | mem0 configuration (Ollama + Qdrant) |
+| `scripts/mem0_mcp_server.py` | MCP server exposing mem0 tools |
+| `scripts/sync_graph_to_mem0.py` | Syncs graphify insights to mem0 |
+| `scripts/pre_tool_context.py` | PreToolUse hook for contextual memory injection |
+| `graphify-out/graph.json` | Knowledge graph (committed to git) |
+| `graphify-out/GRAPH_REPORT.md` | Structural insights (committed to git) |
 | `docker-compose.yml` | Starts Qdrant via OrbStack Docker |
 
-### Setup
+### Session bootstrap (run at the start of every session)
 
-`fish setup.fish` handles everything: starts Qdrant, pulls `bge-m3`, and registers the MCP server with Claude Code. To verify:
+1. Read `graphify-out/GRAPH_REPORT.md` for god nodes, community clusters, and surprising structural connections.
+2. Call `search_memory` (MCP: mem0) with the query `"project decisions overview"` to surface the 5 most recent architectural decisions.
+3. Briefly summarise what was in progress and what was decided before answering the user's first question.
 
-```fish
-lobby --memory      # shows Qdrant status and MCP registration
-```
+### Before answering architecture or design questions
+
+- Use `query_graph` (MCP: graphify) to look up the relevant component. Prefer graph traversal over Glob/Grep for structural questions.
+- Use `search_memory` (MCP: mem0) with the component name as the query to check for past decisions related to it.
+- Cite both sources when they are relevant.
+
+### After making or discovering an architectural decision
+
+- Call `add_memory` (MCP: mem0) immediately.
+- Memory format: `"[Component]: [Decision]. Rationale: [why]."`
+- Include metadata: `{"type": "decision", "component": "<name>"}`
+
+### Storing developer preferences
+
+- When the user states a preference (style, tooling, patterns), store it with `add_memory` and metadata `{"type": "preference"}`.
+- These persist across sessions — do not ask the user to repeat preferences that are already in mem0.
+
+### Graph maintenance
+
+- After the user runs `/graphify .` or `/graphify --update`, immediately run: `.venv/bin/python3 scripts/sync_graph_to_mem0.py`
+- This promotes new god nodes and insights into mem0.
+- Do not re-run graphify on every session — only when files have changed.
 
 ### Starting Qdrant
 
-Qdrant is configured with `restart: unless-stopped`, so it persists across OrbStack restarts. If it's ever down:
+Qdrant is configured with `restart: unless-stopped` in `docker-compose.yml`, so it persists across OrbStack restarts. If it's ever down:
 
-```fish
+```bash
 docker compose up -d    # from the lobby repo root
 ```
 
-### MCP tools available in every session
-
-| Tool | Purpose |
-|---|---|
-| `add_memory` | Store a fact or conversation summary |
-| `search_memories` | Semantic search over stored memories |
-| `get_memories` | List all stored memories |
-| `update_memory` | Edit an existing memory |
-| `delete_memory` | Remove a specific memory |
-
 ### Notes for agents
 
-- `MEM0_LLM_MODEL` in the MCP registration defaults to the lobby builtin (`qwen2.5-coder:latest`) but is set to the user's saved default at `setup.fish` run time
-- The collection name used by mem0-mcp-selfhosted is `mem0_mcp_selfhosted` — use this when querying Qdrant directly
-- If MCP registration needs updating (e.g. model changed): `claude mcp remove mem0` then re-run `fish setup.fish`
-- The correct `claude mcp add` syntax puts the server name BEFORE `-e` flags: `claude mcp add -s user mem0 -e KEY=val ... -- uvx ...` — putting `-e` before the name causes the parser to consume the name as an env var value
-- Qdrant data volume is named `lobby_qdrant_storage` — do not delete it
+- The MCP servers are discovered via `.mcp.json` at project root — no user-level registration needed.
+- mem0 uses Qdrant for vector storage and Ollama (llama3 + nomic-embed-text) for embeddings — all local, no cloud API keys.
+- The PreToolUse hook in `settings.json` injects graphify reminders and top mem0 hits before every Glob/Grep/Read call.
+- If Qdrant is down, mem0 tools will fail with an error message — never silently skipped.
+- The god-node sync script should be run after every graphify build to keep structural knowledge fresh in mem0.
 
 ---
 
