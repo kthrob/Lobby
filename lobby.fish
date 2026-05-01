@@ -160,7 +160,7 @@ function lobby --description "Run Claude Code against local Ollama, Anthropic AP
     # All lobby flags start with --. Any unrecognised --word is a likely typo.
     # Catch it here before it silently becomes a model name or claude arg.
 
-    set _known_flags --help -h --list --set --set-default --set-anthropic-model --anthropic --claude --model
+    set _known_flags --help -h --list --set --set-default --set-anthropic-model --anthropic --claude --model --memory
 
     if test (count $argv) -gt 0
         if string match -qr '^-' -- $argv[1]
@@ -217,6 +217,7 @@ function lobby --description "Run Claude Code against local Ollama, Anthropic AP
         echo (set_color --bold)"OPTIONS"(set_color normal)
         printf "  %-28s %s\n" "--model [name]"        "Override the model; omit name to pick interactively"
         printf "  %-28s %s\n" "--claude"              "Use your Claude.ai subscription (Pro/Max/Team/Enterprise)"
+        printf "  %-28s %s\n" "--memory"              "Show mem0 memory status (Qdrant, MCP registration)"
         printf "  %-28s %s\n" "--set"                 "Interactively toggle which local models are enabled for lobby"
         printf "  %-28s %s\n" "--list"                "Show currently enabled models"
         printf "  %-28s %s\n" "--set-default"         "Pick a default from locally installed Ollama models"
@@ -279,6 +280,49 @@ function lobby --description "Run Claude Code against local Ollama, Anthropic AP
                 echo "  • $model"
             end
         end
+        echo ""
+        return 0
+    end
+
+    # ── --memory ───────────────────────────────────────────────────────────
+
+    if test "$argv[1]" = "--memory"
+        echo ""
+        echo (set_color --bold)"lobby memory (mem0)"(set_color normal)
+        echo ""
+
+        # Qdrant health
+        if curl -sf "http://localhost:6333/healthz" > /dev/null 2>&1
+            echo "  Qdrant:      "(set_color green)"running"(set_color normal)" — http://localhost:6333"
+
+            # Try to get vector count from mem0 collection
+            set _col_info (curl -s "http://localhost:6333/collections/mem0_mcp_selfhosted" 2>/dev/null)
+            set _vec_count (echo $_col_info | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('result',{}).get('vectors_count','?'))" 2>/dev/null)
+            if test -n "$_vec_count"
+                echo "  Memories:    $_vec_count stored vectors"
+            else
+                echo "  Memories:    (collection not yet initialised — run a lobby session first)"
+            end
+        else
+            echo "  Qdrant:      "(set_color red)"not running"(set_color normal)
+            echo ""
+            echo "  Start it with:"
+            echo "    "(set_color cyan)"docker compose up -d"(set_color normal)"   (from the lobby repo root)"
+            echo ""
+            echo "  Or start automatically by re-running:"
+            echo "    "(set_color cyan)"fish setup.fish"(set_color normal)
+        end
+
+        # MCP registration status
+        echo ""
+        set _mcp_registered (claude mcp list 2>/dev/null | grep -c "mem0")
+        if test "$_mcp_registered" -gt 0
+            echo "  MCP server:  "(set_color green)"registered"(set_color normal)" (mem0 tools load in every claude session)"
+        else
+            echo "  MCP server:  "(set_color red)"not registered"(set_color normal)
+            echo "  Register with: fish setup.fish   (from the lobby repo root)"
+        end
+
         echo ""
         return 0
     end
@@ -663,6 +707,12 @@ function lobby --description "Run Claude Code against local Ollama, Anthropic AP
 
     _lobby_info "Mode: local Ollama ($OLLAMA_URL)"
     _lobby_info "Model: $MODEL"
+
+    # Warn if Qdrant is down — memory won't persist, but Claude Code still works
+    if not curl -sf "http://localhost:6333/healthz" > /dev/null 2>&1
+        _lobby_warn "Qdrant not running — mem0 memory will be unavailable this session."
+        _lobby_warn "Start it with: docker compose up -d  (from the lobby repo root)"
+    end
 
     ANTHROPIC_BASE_URL=$OLLAMA_URL \
     ANTHROPIC_AUTH_TOKEN=ollama \

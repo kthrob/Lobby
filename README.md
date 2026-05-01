@@ -203,6 +203,21 @@ fish setup.fish
 lobby/
 ├── lobby.fish     # the fish function
 ├── setup.fish     # dependency installer
-├── CLAUDE.md      # context file for Claude Code
+├── CLAUDE.md      # context for AI agents working in this repo
+├── BACKLOG.md     # planned features, improvements, and bug fixes
 └── README.md      # you are here
 ```
+
+---
+
+## Backlog
+
+Planned work is tracked in [`BACKLOG.md`](./BACKLOG.md). Each entry is a self-contained task with a status, description, implementation notes, and acceptance criteria — written so an agent or a human can pick it up and execute it without needing additional context.
+
+To see what's planned:
+
+```fish
+cat BACKLOG.md
+```
+
+To contribute a task, follow the template in `BACKLOG.md` and assign the next `LOBBY-N` ID.

@@ -18,8 +18,9 @@ The `lobby` function includes an optional model allowlist system (`enabled_model
 |---|---|
 | `lobby.fish` | The fish function — the main deliverable |
 | `setup.fish` | Installer: checks/installs dependencies, installs `lobby.fish` |
-| `CLAUDE.md` | This file — context for Claude Code |
+| `CLAUDE.md` | This file — context for agents |
 | `README.md` | Human-facing documentation |
+| `BACKLOG.md` | Planned features, improvements, and bug fixes (see below) |
 
 ---
 
@@ -62,6 +63,64 @@ If `~/.config/lobby/enabled_models` exists, only models listed in that file can 
 
 ---
 
+## mem0 persistent memory
+
+`lobby` integrates [mem0-mcp-selfhosted](https://github.com/elvismdev/mem0-mcp-selfhosted) to give every Claude Code session persistent memory across terminals and days. The memory layer is fully local — no cloud API keys required.
+
+### Architecture
+
+```
+lobby → claude (CLI) → MCP (stdio) → mem0-mcp-selfhosted (uvx) → Qdrant (OrbStack Docker)
+                                             ↓
+                                      Ollama (LLM + bge-m3 embeddings)
+```
+
+- **Qdrant** stores memory vectors in an OrbStack Docker container (`docker-compose.yml` in repo root)
+- **mem0-mcp-selfhosted** is launched as a stdio subprocess by Claude Code at session start — no separate daemon
+- **bge-m3** is the local embedding model (pulled via `ollama pull bge-m3`)
+- **MCP registration** lives in `~/.claude/settings.json` (scope: user) — applies to all projects
+
+### Repo files
+
+| File | Purpose |
+|---|---|
+| `docker-compose.yml` | Starts Qdrant via OrbStack Docker |
+
+### Setup
+
+`fish setup.fish` handles everything: starts Qdrant, pulls `bge-m3`, and registers the MCP server with Claude Code. To verify:
+
+```fish
+lobby --memory      # shows Qdrant status and MCP registration
+```
+
+### Starting Qdrant
+
+Qdrant is configured with `restart: unless-stopped`, so it persists across OrbStack restarts. If it's ever down:
+
+```fish
+docker compose up -d    # from the lobby repo root
+```
+
+### MCP tools available in every session
+
+| Tool | Purpose |
+|---|---|
+| `add_memory` | Store a fact or conversation summary |
+| `search_memories` | Semantic search over stored memories |
+| `get_memories` | List all stored memories |
+| `update_memory` | Edit an existing memory |
+| `delete_memory` | Remove a specific memory |
+
+### Notes for agents
+
+- `MEM0_LLM_MODEL` in the MCP registration defaults to the lobby builtin (`qwen2.5-coder:latest`) but is set to the user's saved default at `setup.fish` run time
+- The collection name used by mem0-mcp-selfhosted is `mem0_mcp_selfhosted` — use this when querying Qdrant directly
+- If MCP registration needs updating (e.g. model changed): `claude mcp remove mem0` then re-run `fish setup.fish`
+- Qdrant data volume is named `lobby_qdrant_storage` — do not delete it
+
+---
+
 ## Installation
 
 ```fish
@@ -72,7 +131,7 @@ The setup script installs, in order: Homebrew → Python 3 → Node.js → Claud
 
 ---
 
-## Notes for Claude Code
+## Notes for agents
 
 - `lobby.fish` is self-contained — all config paths are defined at the top of the function body.
 - `setup.fish` is idempotent — safe to re-run at any time to update dependencies.
@@ -84,3 +143,49 @@ The setup script installs, in order: Homebrew → Python 3 → Node.js → Claud
 - `--claude` and `--anthropic` share the same model list and the same `default_anthropic_model` config file — the distinction is only in how the `claude` process authenticates.
 - The `_lobby_pick_model_interactive` helper is used by `--model` (picker), `--set-default`, and `--set-anthropic-model` — all three share the same numbered list UI.
 - The model allowlist feature mirrors the implementation in `llamy` — if modifying one, consider syncing changes to the other.
+
+---
+
+## Backlog
+
+Planned work lives in [`BACKLOG.md`](./BACKLOG.md). It is the authoritative source for what needs doing in this repo — bugs, features, and improvements.
+
+### How the backlog works
+
+Each task in `BACKLOG.md` has a status, a unique ID (`LOBBY-N`), metadata, a full description, implementation notes, and acceptance criteria. The format is designed so an agent can open the file, pick up a task, implement it, and mark it done — without needing additional context from a human.
+
+### Agent workflow for backlog tasks
+
+1. **Read `BACKLOG.md` first.** Before starting any work session, scan for `[PLANNED]` or `[IN PROGRESS]` tasks relevant to the work being requested.
+2. **Claim the task.** Change its status from `[PLANNED]` to `[IN PROGRESS]` and update the `Updated` date before touching any code.
+3. **Follow the implementation notes.** Each task includes specific file locations, known edge cases, and decisions already made — use them.
+4. **Mark done and move.** When complete, change status to `[DONE]` and move the task block to the `## Completed` section at the bottom of `BACKLOG.md`.
+5. **Add new tasks as discovered.** If work reveals a new bug or improvement, add it to `BACKLOG.md` with the next sequential ID rather than silently fixing or ignoring it.
+
+### Adding a task
+
+Use this minimal template and append it to the `## Planned` section, maintaining priority order (high → medium → low):
+
+```markdown
+### [PLANNED] Short imperative title (#LOBBY-N)
+
+- **ID**: LOBBY-N
+- **Type**: bug | feature | improvement | refactor
+- **Priority**: high | medium | low
+- **Effort**: small | medium | large
+- **Added**: YYYY-MM-DD
+- **Updated**: YYYY-MM-DD
+- **Author**: name or "agent"
+
+#### Problem / Motivation
+...
+
+#### Proposed Solution
+...
+
+#### Implementation Notes
+...
+
+#### Acceptance Criteria
+- [ ] ...
+```

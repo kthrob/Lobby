@@ -132,7 +132,113 @@ else
     ok "Ollama up to date ("(ollama --version 2>&1 | head -1)")"
 end
 
-# ── 6. Install lobby.fish ─────────────────────────────────────────────────────
+# ── 6. mem0 persistent memory ────────────────────────────────────────────────
+# Sets up Qdrant (vector store) via OrbStack Docker and registers the
+# mem0-mcp-selfhosted MCP server with Claude Code CLI so every lobby
+# session automatically has access to persistent memory tools.
+
+header "mem0 persistent memory"
+
+# Check Docker is available (OrbStack must be running)
+if not command -q docker
+    warn "Docker not found — skipping mem0 setup."
+    warn "Install OrbStack (https://orbstack.dev) and re-run setup.fish to enable memory."
+else if not docker info > /dev/null 2>&1
+    warn "Docker daemon not running — skipping mem0 setup."
+    warn "Start OrbStack and re-run setup.fish to enable memory."
+else
+    # Start Qdrant via docker compose
+    if not test -f ./docker-compose.yml
+        die "docker-compose.yml not found. Run setup.fish from the lobby repo root."
+    end
+
+    info "Starting Qdrant vector store..."
+    docker compose up -d 2>/dev/null
+    or die "docker compose up failed. Check OrbStack and try again."
+
+    # Wait for Qdrant health (up to 15 s)
+    set _q_attempts 0
+    while test $_q_attempts -lt 15
+        if curl -sf "http://localhost:6333/healthz" > /dev/null 2>&1
+            break
+        end
+        sleep 1
+        set _q_attempts (math $_q_attempts + 1)
+    end
+
+    if not curl -sf "http://localhost:6333/healthz" > /dev/null 2>&1
+        warn "Qdrant did not respond in time — mem0 MCP may not work until it's healthy."
+        warn "Check: docker compose ps"
+    else
+        ok "Qdrant is running at http://localhost:6333"
+    end
+
+    # Pull bge-m3 embedding model (needed by mem0 for local embeddings)
+    info "Checking for bge-m3 embedding model (required by mem0, ~670 MB)..."
+    set _has_bge (ollama list 2>/dev/null | grep -c "bge-m3")
+    if test "$_has_bge" -eq 0
+        echo ""
+        read --prompt-str (set_color cyan)"[setup]"(set_color normal)" Pull bge-m3 embedding model now? [Y/n]: " bge_answer
+        if test "$bge_answer" != "n" -a "$bge_answer" != "N"
+            # Ensure Ollama is running to pull
+            if not pgrep -x ollama > /dev/null
+                info "Starting Ollama to pull bge-m3..."
+                ollama serve > /dev/null 2>&1 &
+                set _bge_ollama_pid $last_pid
+                sleep 2
+                set _started_for_bge 1
+            end
+            ollama pull bge-m3
+            if set -q _started_for_bge
+                kill $_bge_ollama_pid 2>/dev/null
+            end
+            ok "bge-m3 ready"
+        else
+            warn "Skipped. Pull it later with: ollama pull bge-m3"
+            warn "mem0 will fail to start until bge-m3 is available."
+        end
+    else
+        ok "bge-m3 already installed"
+    end
+
+    # Register mem0 MCP server with Claude Code (scope: user, applies to all projects)
+    if not command -q claude
+        warn "Claude Code CLI not found — skipping MCP registration."
+        warn "Run setup.fish again after installing Claude Code."
+    else
+        # Check if already registered to avoid duplicates
+        set _already_registered (claude mcp list 2>/dev/null | grep -c "mem0")
+        if test "$_already_registered" -gt 0
+            ok "mem0 MCP already registered with Claude Code"
+        else
+            info "Registering mem0 MCP server with Claude Code..."
+
+            # Determine the default local model to use for memory extraction
+            set _mem0_llm "qwen2.5-coder:latest"
+            if test -f "$HOME/.config/lobby/default_local_model"
+                set _saved (string trim -- (cat "$HOME/.config/lobby/default_local_model" 2>/dev/null))
+                if test -n "$_saved"
+                    set _mem0_llm $_saved
+                end
+            end
+
+            if claude mcp add -s user mem0 \
+                -e MEM0_USER_ID=lobby-user \
+                -e MEM0_PROVIDER=ollama \
+                -e MEM0_LLM_MODEL=$_mem0_llm \
+                -e MEM0_OLLAMA_BASE_URL=http://127.0.0.1:11434 \
+                -e MEM0_QDRANT_URL=http://localhost:6333 \
+                -- uvx --from "git+https://github.com/elvismdev/mem0-mcp-selfhosted.git" mem0-mcp-selfhosted
+                ok "mem0 MCP registered (scope: user)"
+            else
+                warn "MCP registration failed — run manually:"
+                warn "  claude mcp add -s user mem0 -e MEM0_USER_ID=lobby-user -e MEM0_PROVIDER=ollama -e MEM0_LLM_MODEL=$_mem0_llm -e MEM0_OLLAMA_BASE_URL=http://127.0.0.1:11434 -e MEM0_QDRANT_URL=http://localhost:6333 -- uvx --from 'git+https://github.com/elvismdev/mem0-mcp-selfhosted.git' mem0-mcp-selfhosted"
+            end
+        end
+    end
+end
+
+# ── 7. Install lobby.fish ─────────────────────────────────────────────────────
 
 header "Installing lobby"
 
@@ -159,7 +265,7 @@ else
     die "lobby is not discoverable in Fish after install. Check your fish function path and rerun setup."
 end
 
-# ── 7. ANTHROPIC_API_KEY check ────────────────────────────────────────────────
+# ── 8. ANTHROPIC_API_KEY check ────────────────────────────────────────────────
 
 header "Anthropic API key"
 
@@ -172,7 +278,7 @@ else
     warn "  set -Ux ANTHROPIC_API_KEY sk-ant-..."
 end
 
-# ── 8. Pull a starter model ───────────────────────────────────────────────────
+# ── 9. Pull a starter model ───────────────────────────────────────────────────
 
 header "Starter model"
 
