@@ -50,8 +50,9 @@ The setup script handles everything in order:
 3. **Node.js** — required by Claude Code CLI
 4. **Claude Code CLI** — `npm install -g @anthropic-ai/claude-code`
 5. **Ollama** — local model server
-6. Copies `lobby.fish` → `~/.config/fish/functions/` and makes it executable
-7. Optionally pulls a starter model (`qwen2.5-coder:latest`)
+6. **mem0 memory** — starts Qdrant (OrbStack Docker), pulls `bge-m3` embedding model, registers mem0 MCP server with Claude Code
+7. Copies `lobby.fish` → `~/.config/fish/functions/` and makes it executable
+8. Optionally pulls a starter model (`qwen2.5-coder:latest`)
 
 Open a new terminal when done.
 
@@ -71,6 +72,7 @@ lobby --set                   # toggle which local models are enabled for lobby
 lobby --list                  # list currently enabled models
 lobby --set-default           # pick a default from locally installed Ollama models
 lobby --set-anthropic-model   # pick a default Anthropic model
+lobby --memory                # show mem0 memory status (Qdrant, MCP registration)
 lobby --help                  # show all commands
 ```
 
@@ -130,6 +132,34 @@ Available models:
 
 ---
 
+## Persistent memory (mem0)
+
+Every `lobby` session automatically has persistent memory via [mem0](https://github.com/elvismdev/mem0-mcp-selfhosted) — fully local, no cloud API keys.
+
+```
+lobby → claude (CLI) → MCP → mem0-mcp-selfhosted → Qdrant (OrbStack Docker)
+                                       ↓
+                               Ollama (bge-m3 embeddings)
+```
+
+Memory tools are available in every session without any extra steps:
+
+| Tool | What it does |
+|---|---|
+| `add_memory` | Store a fact or conversation summary |
+| `search_memories` | Semantic search over stored memories |
+| `get_memories` | List everything stored |
+| `update_memory` / `delete_memory` | Edit or remove entries |
+
+`setup.fish` handles the one-time setup (Qdrant container, `bge-m3` model, MCP registration). Qdrant is configured with `restart: unless-stopped` so it survives OrbStack restarts. If it's ever down:
+
+```fish
+docker compose up -d    # from the lobby repo root
+lobby --memory          # verify status
+```
+
+---
+
 ## How it works
 
 lobby has three modes, selected by flag:
@@ -157,6 +187,7 @@ Ollama v0.14+ exposes an Anthropic Messages API-compatible endpoint natively at 
 | macOS (Apple Silicon) | M1 / M2 / M3 |
 | [Fish shell](https://fishshell.com/) | `lobby` is a native fish function |
 | [Homebrew](https://brew.sh) | All deps installed through it |
+| [OrbStack](https://orbstack.dev) | Docker runtime for Qdrant (mem0 vector store) |
 | [Node.js](https://nodejs.org) | Installed by `setup.fish` |
 | [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) | Installed by `setup.fish` |
 | [Ollama](https://ollama.com) v0.14+ | Installed by `setup.fish` |
@@ -184,6 +215,8 @@ set -Ux ANTHROPIC_API_KEY sk-ant-...
 | `~/.config/lobby/default_local_model` | Saved default local Ollama model |
 | `~/.config/lobby/default_anthropic_model` | Saved default Anthropic model |
 | `~/.config/lobby/enabled_models` | Optional allowlist of enabled models |
+| `~/.claude.json` | Claude Code user config — mem0 MCP server registered here |
+| `lobby_qdrant_storage` (Docker volume) | Qdrant persistent vector storage — do not delete |
 
 ---
 
@@ -201,11 +234,12 @@ fish setup.fish
 
 ```
 lobby/
-├── lobby.fish     # the fish function
-├── setup.fish     # dependency installer
-├── CLAUDE.md      # context for AI agents working in this repo
-├── BACKLOG.md     # planned features, improvements, and bug fixes
-└── README.md      # you are here
+├── lobby.fish          # the fish function
+├── setup.fish          # dependency installer + mem0 setup
+├── docker-compose.yml  # Qdrant vector store (for mem0 memory)
+├── CLAUDE.md           # context for AI agents working in this repo
+├── BACKLOG.md          # planned features, improvements, and bug fixes
+└── README.md           # you are here
 ```
 
 ---

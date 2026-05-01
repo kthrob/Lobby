@@ -17,7 +17,8 @@ The `lobby` function includes an optional model allowlist system (`enabled_model
 | File | Description |
 |---|---|
 | `lobby.fish` | The fish function — the main deliverable |
-| `setup.fish` | Installer: checks/installs dependencies, installs `lobby.fish` |
+| `setup.fish` | Installer: checks/installs dependencies, installs `lobby.fish`, sets up mem0 |
+| `docker-compose.yml` | Starts Qdrant (vector store for mem0) via OrbStack Docker |
 | `CLAUDE.md` | This file — context for agents |
 | `README.md` | Human-facing documentation |
 | `BACKLOG.md` | Planned features, improvements, and bug fixes (see below) |
@@ -78,7 +79,7 @@ lobby → claude (CLI) → MCP (stdio) → mem0-mcp-selfhosted (uvx) → Qdrant 
 - **Qdrant** stores memory vectors in an OrbStack Docker container (`docker-compose.yml` in repo root)
 - **mem0-mcp-selfhosted** is launched as a stdio subprocess by Claude Code at session start — no separate daemon
 - **bge-m3** is the local embedding model (pulled via `ollama pull bge-m3`)
-- **MCP registration** lives in `~/.claude/settings.json` (scope: user) — applies to all projects
+- **MCP registration** lives in `~/.claude.json` (scope: user) — applies to all projects
 
 ### Repo files
 
@@ -117,6 +118,7 @@ docker compose up -d    # from the lobby repo root
 - `MEM0_LLM_MODEL` in the MCP registration defaults to the lobby builtin (`qwen2.5-coder:latest`) but is set to the user's saved default at `setup.fish` run time
 - The collection name used by mem0-mcp-selfhosted is `mem0_mcp_selfhosted` — use this when querying Qdrant directly
 - If MCP registration needs updating (e.g. model changed): `claude mcp remove mem0` then re-run `fish setup.fish`
+- The correct `claude mcp add` syntax puts the server name BEFORE `-e` flags: `claude mcp add -s user mem0 -e KEY=val ... -- uvx ...` — putting `-e` before the name causes the parser to consume the name as an env var value
 - Qdrant data volume is named `lobby_qdrant_storage` — do not delete it
 
 ---
@@ -127,7 +129,7 @@ docker compose up -d    # from the lobby repo root
 fish setup.fish
 ```
 
-The setup script installs, in order: Homebrew → Python 3 → Node.js → Claude Code CLI → Ollama, then copies `lobby.fish` into `~/.config/fish/functions/` and optionally pulls a starter model.
+The setup script installs, in order: Homebrew → Python 3 → Node.js → Claude Code CLI → Ollama → mem0 (Qdrant + bge-m3 + MCP registration), then copies `lobby.fish` into `~/.config/fish/functions/` and optionally pulls a starter model.
 
 ---
 
