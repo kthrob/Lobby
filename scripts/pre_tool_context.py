@@ -36,7 +36,8 @@ if Path("graphify-out/graph.json").exists():
 if query.strip():
     try:
         m = Memory.from_config(MEM0_CONFIG)
-        memories = m.search(query, user_id="project", limit=2)
+        raw = m.search(query, filters={"user_id": "project"}, limit=2)
+        memories = raw.get("results", raw) if isinstance(raw, dict) else raw
         for mem in memories:
             score = mem.get("score", "")
             score_str = f" (relevance: {score:.2f})" if isinstance(score, float) else ""

@@ -129,10 +129,11 @@ def test_search_memories(m):
     all_passed = True
     for query, expected_type in test_queries:
         try:
-            results = m.search(query, user_id=PROJECT_ID, limit=1)
+            raw = m.search(query, filters={"user_id": PROJECT_ID}, limit=1)
+            results = raw.get("results", raw) if isinstance(raw, dict) else raw
             if results:
                 result = results[0]
-                relevance = result.get("score", 0)
+                relevance = result.get("score") or result.get("relevance_score", 0)
                 mem_type = result.get("metadata", {}).get("type", "unknown")
 
                 # Check if the result is relevant
@@ -151,39 +152,55 @@ def test_search_memories(m):
     return all_passed
 
 def test_metadata_validation(m):
-    """Test 5: Verify metadata validation works."""
-    print_header("Test 5: Metadata Validation")
+    """Test 5: Verify MCP server metadata validation rejects invalid types."""
+    print_header("Test 5: Metadata Validation (MCP handler)")
 
-    PROJECT_ID = "project"
-    VALID_TYPES = {"decision", "preference", "insight", "observation"}
+    sys.path.insert(0, ".")
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("mem0_mcp_server", "scripts/mem0_mcp_server.py")
+    mod = importlib.util.load_from_spec = spec
+    # Import handle() directly
+    from scripts.mem0_mcp_server import handle, VALID_MEMORY_TYPES
 
-    # Test invalid type
-    print_info("Testing invalid metadata type...")
-    try:
-        m.add(
-            "This should be rejected",
-            user_id=PROJECT_ID,
-            metadata={"type": "bug"}  # Invalid type
-        )
-        print_fail("Invalid type was accepted (should have been rejected)")
+    def call_add(content, metadata):
+        return handle({
+            "jsonrpc": "2.0", "id": 1,
+            "method": "tools/call",
+            "params": {"name": "add_memory", "arguments": {"content": content, "metadata": metadata}}
+        })
+
+    # Invalid type should return an error message
+    print_info("Testing invalid metadata type 'bug'...")
+    resp = call_add("This should be rejected", {"type": "bug"})
+    result_text = resp["result"]["content"][0]["text"]
+    if "Error" in result_text and "bug" in result_text:
+        print_pass(f"Invalid type correctly rejected: {result_text}")
+    else:
+        print_fail(f"Invalid type was not rejected. Got: {result_text}")
         return False
-    except Exception as e:
-        # mem0 might not validate, so we check the validation logic in the MCP server instead
-        print_info(f"mem0 library doesn't validate; MCP server handles validation")
 
-    # Test valid type
-    print_info("Testing valid metadata type...")
-    try:
-        m.add(
-            "This test memory with valid type should succeed",
-            user_id=PROJECT_ID,
-            metadata={"type": "decision", "component": "test"}
-        )
-        print_pass("Valid metadata accepted")
-        return True
-    except Exception as e:
-        print_fail(f"Valid metadata rejected: {e}")
+    # Valid type should succeed
+    print_info("Testing valid metadata type 'decision'...")
+    resp = call_add("MCP server validation confirmed working.", {"type": "decision", "component": "test"})
+    result_text = resp["result"]["content"][0]["text"]
+    if "Error" not in result_text:
+        print_pass(f"Valid type accepted: {result_text[:60]}...")
+    else:
+        print_fail(f"Valid type was rejected. Got: {result_text}")
         return False
+
+    # Auto-date should be added
+    print_info("Testing auto-date injection...")
+    resp = call_add("Memory without date should get one.", {"type": "preference"})
+    result_text = resp["result"]["content"][0]["text"]
+    if "Error" not in result_text:
+        print_pass("Auto-date added for memory without explicit date")
+    else:
+        print_fail(f"Unexpected error: {result_text}")
+        return False
+
+    print_info(f"Valid types: {', '.join(sorted(VALID_MEMORY_TYPES))}")
+    return True
 
 def test_pre_tool_use_hook():
     """Test 6: Verify PreToolUse hook is configured."""

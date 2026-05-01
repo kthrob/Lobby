@@ -106,14 +106,16 @@ def handle(request: dict) -> dict:
                     )
                     text = f"Stored memory (untyped): {args['content'][:80]}... [Note: include 'type' in metadata for better organization]"
             elif name == "search_memory":
-                memories = m.search(args["query"], user_id=PROJECT_ID, limit=args.get("limit", 5))
+                raw = m.search(args["query"], filters={"user_id": PROJECT_ID}, limit=args.get("limit", 5))
+                memories = raw.get("results", raw) if isinstance(raw, dict) else raw
                 if not memories:
                     text = "No relevant memories found."
                 else:
                     lines = [f"- [{r['id'][:8]}] {r['memory']}" for r in memories]
                     text = "Relevant memories:\n" + "\n".join(lines)
             elif name == "get_all_memories":
-                all_mem = m.get_all(user_id=PROJECT_ID)
+                raw = m.get_all(filters={"user_id": PROJECT_ID})
+                all_mem = raw.get("results", raw) if isinstance(raw, dict) else raw
                 if not all_mem:
                     text = "No memories stored yet."
                 else:
